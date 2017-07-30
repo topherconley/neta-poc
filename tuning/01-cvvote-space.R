@@ -44,7 +44,7 @@ if (comp == "gauss") {
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/topher/Shared/scratch-data/neta-poc/filtered-s2-data"
+filterdir <- "/home/cconley/scratch-data/neta-poc/filtered-s2-data"
 #filterdir <- "~/scratch-data/neta-poc/filtered-s2-data"
 fy <- "poc-prot-eset-dropout-std.rds"
 fx <- "poc-cna-eset-dropout-std.rds"
@@ -84,9 +84,8 @@ tmap <- expand.grid(lam1 = exp(seq(log(75), log(120), length = 40)))
 
 #result directory
 respath <- "/home/cconley/scratch-data/neta-poc/tuning/01"
-logpath <- file.path(respath, "logs")
-if (!dir.exists(logpath)) { 
-  system(paste("mkdir -p", logpath))  
+if (!dir.exists(respath)) { 
+  system(paste("mkdir -p", respath))  
 }
 
 library(spacemap)
