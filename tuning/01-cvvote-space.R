@@ -44,9 +44,10 @@ if (comp == "gauss") {
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/cconley/scratch-data/neta-metabric/disc-filtered/"
-fy <- "disc-mrna-eset-nostd-union-dropout-std-Her2.rds"
-fx <- "disc-cna-eset-nostd-union-dropout-multi-std-Her2.rds"
+filterdir <- "/home/topher/Shared/scratch-data/neta-poc/filtered-s2-data"
+#filterdir <- "~/scratch-data/neta-poc/filtered-s2-data"
+fy <- "poc-prot-eset-dropout-std.rds"
+fx <- "poc-cna-eset-dropout-std.rds"
 library(Biobase)
 xset <- readRDS(file.path(filterdir, fx))
 X <- t(exprs(xset))
@@ -71,23 +72,28 @@ lam0
 ##################
 
 #training/test setse
-trainSets <- readRDS(file.path(filterdir, "discovery_train_sets_dropoutHer2.rds"))
-testSets <- readRDS(file.path(filterdir, "discovery_test_sets_dropoutHer2.rds"))
+trainSets <- readRDS(file.path(filterdir, "train_sets.rds"))
+testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 
 ##################
 #   TRY O1       #
 ##################
 
 #GRID
-tmap <- expand.grid(lam1 = sqrt(seq(55^2, 100^2, length = 40)))
+tmap <- expand.grid(lam1 = exp(seq(log(75), log(120), length = 40)))
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-metabric/disc-cv-vote/her2/01/"
+respath <- "/home/cconley/scratch-data/neta-poc/tuning/01"
+logpath <- file.path(respath, "logs")
+if (!dir.exists(logpath)) { 
+  system(paste("mkdir -p", logpath))  
+}
+
 library(spacemap)
 tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
                                                   trainIds = trainSets, testIds = testSets, 
                                                   method = "space", tuneGrid = tmap, 
                                                   resPath = respath,
                                                   tol = 1e-4, cdmax = 6e7)})
-save.image(file = file.path(respath, "her2-01.rda"))
+save.image(file = file.path(respath, "poc-space-01.rda"))
 stopCluster(cl)
