@@ -76,23 +76,26 @@ trainSets <- readRDS(file.path(filterdir, "train_sets.rds"))
 testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 
 ##################
-#   TRY O1       #
+#   TRY O4       #
 ##################
 
-#GRID
-tmap <- expand.grid(lam1 = exp(seq(log(75), log(120), length = 40)))
+tmap <- expand.grid(lam1 = c(182.141,seq(150, 200, length = 5)),
+                    lam2 = sqrt(seq(10^2, 70^2, length = 10)),
+                    lam3 = (seq(sqrt(0), sqrt(90), length = 10))^2)
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/tuning/01"
+respath <- "/home/cconley/scratch-data/neta-poc/tuning/04"
 if (!dir.exists(respath)) { 
   system(paste("mkdir -p", respath))  
 }
 
 library(spacemap)
-tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
-                                                  trainIds = trainSets, testIds = testSets, 
-                                                  method = "space", tuneGrid = tmap, 
-                                                  resPath = respath,
-                                                  tol = 1e-4, cdmax = 90e7)})
-save.image(file = file.path(respath, "poc-space-01.rda"))
+tictoc <- system.time({cvsmap <- cvVote(Y = Y, X = X,
+                                        trainIds = trainSets, testIds = testSets,
+                                        method = "spacemap", tuneGrid = tmap,
+                                        resPath = respath,
+                                        tol = 1e-4, cdmax = 20e7,
+					refitRidge = 0.1)})
+
+save.image(file = file.path(respath, "poc-spacemap-04.rda"))
 stopCluster(cl)
