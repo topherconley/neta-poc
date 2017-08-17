@@ -455,6 +455,16 @@ drop_at_random <- hc_protmad$hcp[hc_protmad$dup]
 drop_at_random <- sapply(drop_at_random, function(x) sample(x, 1))
 ```
 
+```{r}
+#standardize after -> no outliers -> no multicolinearity
+nohc_index <- sort(unique(unlist(hc_protmad$hcp)))
+protmad <- protmad[-nohc_index,]
+exprs(protmad) <- t(scale(t(exprs(protmad))))
+saveRDS(object = protmad, 
+        file = file.path(filterdir, 
+                         "poc-prot-eset-dropout-nohcprot-std.rds"))
+```
+
 ## Cross Validation Folds
 
 Partition samples into mutually exclusive test sets. We do not balance the samples of the test sets with any clinical covariate. 

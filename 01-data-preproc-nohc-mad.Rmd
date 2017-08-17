@@ -27,7 +27,7 @@ We will store the intermediate filtered data here:
 
 ```{r}
 priordir <- "~/scratch-data/neta-poc/filtered-s2-data/"
-filterdir <- "~/scratch-data/neta-poc/pnnl-mad-filtered/"
+filterdir <- "~/scratch-data/neta-poc/nohc-mad-filtered/"
 ```
 
 We now import and validate the data.
@@ -137,29 +137,12 @@ colnames(cna_assay) <- substring(text = colnames(cna_assay), 1, 12)
 str(cna_assay)
 ```
 
-```{r}
-library(readr)
-full <- read_csv(file = "~/scratch-data/neta-poc/cell-paper-table-s2-data/FullProteomeOvarianData.csv")
-vpoc <- read_csv(file = "~/scratch-data/neta-poc/cell-paper-table-s2-data/VariableProteomeOvarianData.csv")
-vpoc_samples <- colnames(vpoc)[3:length(vpoc)]
-#Divide samples by collection site
-samples <- colnames(full)[3:length(full)]
-tcga_samples <- gsub("JHU-|PNNL-", "",samples)
-not_hgsc <- tcga_samples[!(tcga_samples %in% vpoc_samples)]
-not_hgsc_index <- sapply(not_hgsc, function(pat) grep(pat = pat, x = samples))
-samples <- samples[-not_hgsc_index]
-pnnl_samples <- samples[grep("PNNL", samples)]
-tcga_pnnl_samples <- gsub("PNNL-", "", pnnl_samples)
-```
-
-
 We combine the CNA interval data with the clinical variables and CNA attributes into an `ExpressionSet` object. 
 
 ```{r}
 suppressPackageStartupMessages(library(Biobase))
 cnaset <- ExpressionSet(assayData = cna_assay, 
                         featureData = AnnotatedDataFrame(data = cna_node_attributes))
-cnaset <- cnaset[,tcga_pnnl_samples]
 saveRDS(object = cnaset, file = file.path(filterdir, "poc-cna-eset.rds"))
 cnaset
 ```
@@ -187,23 +170,11 @@ stopifnot(!any(is.na(pexp)))
 sd_pexp <- apply(X = pexp, MARGIN = 1, FUN = sd)
 mad_pexp <- apply(X = pexp, MARGIN = 1, FUN = mad)
 mean_pexp <- apply(X = pexp, MARGIN = 1, FUN = mean)
-keep_prot_index <- mad_pexp > quantile(x = mad_pexp, probs = 0.60)
+keep_prot_index <- mad_pexp > quantile(x = mad_pexp, probs = 0.40)
 protmad <- vpocset[which(keep_prot_index),]
 #no duplicated refseq ids
 stopifnot(!anyDuplicated(featureNames(protmad)))
 ```
-
-
-```{r}
-mpnnl <- as.matrix(full[,pnnl_samples])
-rownames(mpnnl) <- full$refseq_peptide
-colnames(mpnnl) <- tcga_pnnl_samples
-#subset of full to match the variable set
-mpnnlv <- mpnnl[featureNames(protmad),]
-protmad <- protmad[,tcga_pnnl_samples]
-exprs(protmad) <- mpnnlv
-```
-
 
 The mean-variance relationship of the protein data is as follows. 
 
@@ -327,16 +298,16 @@ outlier_by_loc <- function(loa, thresh_loc) {
 }
 #thresholds
 protein_outliers <- outlier_by_loc(prot_pco, 30)
-cna_outliers <-  outlier_by_loc(cna_pco, 25)
+cna_outliers <-  outlier_by_loc(cna_pco, 19.5)
 ```
 
-We decided to remove the most extreme outliers, one from CNA and two from protein. 
+We decided to remove the most extreme outlier just from the protein for now. 
 
 ```{r}
 #assert sample names match
 stopifnot(sampleNames(protmad) == sampleNames(cnaset))
-protmad <- protmad[,!(sampleNames(protmad) %in% c(protein_outliers, cna_outliers))]
-cnaset <- cnaset[,!(sampleNames(cnaset) %in%  c(protein_outliers, cna_outliers))]
+protmad <- protmad[,!(sampleNames(protmad) %in% protein_outliers)]
+cnaset <- cnaset[,!(sampleNames(cnaset) %in% protein_outliers)]
 stopifnot(sampleNames(protmad) == sampleNames(cnaset))
 ```
 
@@ -405,7 +376,7 @@ hc_cna <- function(eset) {
 cnaset <- hc_cna(cnaset)
 ```
 
-There is only a few pairs of highly correlated CNA that was reduced. 
+There is only two pairs of highly correlated CNA that was reduced. 
 
 ```{r}
 tmp <- fData(cnaset)
@@ -476,11 +447,9 @@ saveRDS(object = protmad,
                          "poc-prot-eset-dropout-std.rds"))
 ```
 
+Drop one isoform of highly correlated protein isoform pairs at random. 
 
-
-```{r, eval = F}
-#Not run!!!!
-#Drop one isoform of highly correlated protein isoform pairs at random. 
+```{r}
 set.seed(243)
 drop_at_random <- hc_protmad$hcp[hc_protmad$dup]
 drop_at_random <- sapply(drop_at_random, function(x) sample(x, 1))
