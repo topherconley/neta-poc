@@ -1,0 +1,186 @@
+---
+title: "Untitled"
+author: "Chris Conley"
+date: "August 12, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Data import
+
+```{r}
+filterdir <- "~/scratch-data/neta-poc/filtered-s2-data"
+#filterdir <- "~/scratch-data/neta-poc/filtered-s2-data"
+fy <- "poc-prot-eset-dropout-std.rds"
+fx <- "poc-cna-eset-dropout-std.rds"
+suppressPackageStartupMessages(library(Biobase))
+xset <- readRDS(file.path(filterdir, fx))
+x <- t(exprs(xset))
+yset <- readRDS(file.path(filterdir, fy))
+y <- t(exprs(yset))
+#assert the sample names match
+stopifnot(all(sampleNames(xset) == sampleNames(yset)))
+xycor <- cor(x = x, y = y, method = "spearman")
+```
+
+
+
+```{r}
+library(readr)
+full <- read_csv(file = "~/scratch-data/neta-poc/cell-paper-table-s2-data/FullProteomeOvarianData.csv")
+vpoc <- read_csv(file = "~/scratch-data/neta-poc/cell-paper-table-s2-data/VariableProteomeOvarianData.csv")
+vpoc_samples <- colnames(vpoc)[3:length(vpoc)]
+
+#Divide samples by collection site and reduce to 169 from 174
+samples <- colnames(full)[3:length(full)]
+tcga_samples <- gsub("JHU-|PNNL-", "",samples)
+not_hgsc <- tcga_samples[!(tcga_samples %in% vpoc_samples)]
+not_hgsc_index <- sapply(not_hgsc, function(pat) grep(pat = pat, x = samples))
+samples <- samples[-not_hgsc_index]
+pnnl_samples <- samples[grep("PNNL", samples)]
+jhu_samples <- samples[grep("JHU", samples)]
+tcga_jhu_samples <- gsub("JHU-", "", jhu_samples)
+tcga_pnnl_samples <- gsub("PNNL-", "", pnnl_samples)
+common_samples <- intersect(tcga_jhu_samples, tcga_pnnl_samples)
+
+#one sample was dropped because it was an outlier
+common_samples_01 <- common_samples[which(common_samples %in% sampleNames(xset))]
+common_pnnl_01 <- paste0("PNNL-", common_samples_01)
+common_jhu_01 <- paste0("JHU-", common_samples_01)
+
+
+mjhu <- as.matrix(full[,jhu_samples])
+rownames(mjhu) <- full$refseq_peptide
+mpnnl <- as.matrix(full[,pnnl_samples])
+rownames(mpnnl) <- full$refseq_peptide
+
+dim(x)
+#subset of full to match the variable set
+mjhu_fullv <- mjhu[featureNames(yset),]
+mpnnl_fullv <- mpnnl[featureNames(yset),]
+
+
+xycor_jhuv <- cor(x = x[common_samples_01,], y = t(mjhu_fullv[,common_jhu_01]), method = "spearman")
+xycor_pnnlv <- cor(x = x[common_samples_01,], y = t(mpnnl_fullv[,common_pnnl_01]), method = "spearman")
+xycor_var <- cor(x = x[common_samples_01,], y = y[common_samples_01,], method = "spearman")
+library(ggplot2)
+p1 <- qplot( x = as.vector(xycor_jhuv), y =  as.vector(xycor_pnnlv)) + geom_point(alpha = 0.3) + 
+  geom_smooth() + 
+  theme_bw() + 
+  annotate(geom="text", x=0.05, y=.8, 
+           label=  round(cor(x = as.vector(xycor_jhuv),
+                       y = as.vector(xycor_pnnlv)),3),
+           color="red") + 
+  ggtitle("Correlations of protein ~ CNA") + 
+  xlab ("JHU (variable) before merging") + 
+  ylab ("PNNL (variable) before merging") 
+ggsave(filename = "~/repos/neta-poc/pnnl_vs_jhu_marginal_corelations.png", plot = p1)
+
+p2 <- qplot( x = as.vector(xycor_var), y =  as.vector(xycor_pnnlv)) + geom_point(alpha = 0.3) + 
+  geom_smooth() + 
+  theme_bw() + 
+  annotate(geom="text", x=0.05, y=.8, 
+           label=  round(cor(x = as.vector(xycor_jhuv),
+                       y = as.vector(xycor_pnnlv)),3),
+           color="red") + 
+  ggtitle("Correlations of protein ~ CNA") + 
+  xlab ("Merged (variable)") + 
+  ylab ("PNNL (variable) before merging") 
+ggsave(filename = "~/repos/neta-poc/pnnl_vs_merged_marginal_corelations.png", plot= p2)
+                                                                        
+
+p3 <- qplot( x = as.vector(xycor_var), y =  as.vector(xycor_jhuv)) + geom_point(alpha = 0.3) + 
+  geom_smooth() + 
+  theme_bw() + 
+  annotate(geom="text", x=0.05, y=.8, 
+           label=  round(cor(x = as.vector(xycor_jhuv),
+                       y = as.vector(xycor_pnnlv)),3),
+           color="red") + 
+  ggtitle("Correlations of protein ~ CNA") + 
+  xlab ("Merged (variable)") + 
+  ylab ("JHU (variable) before merging") 
+ggsave(filename = "~/repos/neta-poc/jhu_vs_merged_marginal_corelations.png", plot = p3)
+
+```
+
+
+
+## Marginal Analysis
+
+```{r, eval = F}
+library(SuppDists)
+pvals <- matrix(data = NA, nrow = ncol(x), ncol = ncol(y))
+r <- nrow(x)
+for(p in seq_len(ncol(x))) { 
+  for(q in seq_len(ncol(y)))  {
+    tmp <- cor.test(x = x[,p], y = y[,q], method = "spearman", exact = F)
+    pvals[p,q] <- tmp$p.value 
+  }
+}
+colnames(pvals) <- colnames(y)
+rownames(pvals) <- colnames(x)
+saveRDS(object = pvals, file = file.path(filterdir, "prot-cna-spearman-pvals.rds"))
+```
+
+Adjust P-value by CNA.
+
+Add degree distribution with hubs.
+
+Order hubs. 
+
+```{r}
+pvals <- readRDS(file.path(filterdir, "prot-cna-spearman-pvals.rds"))
+#p.adjust.methods
+global_adj_pvals <- p.adjust(p  = as.numeric(pvals), method = "BH")
+by_cna_adj_pvals <- apply(pvals, 1, p.adjust, method = "BH")
+global_adj_pvals <- matrix(data = global_adj_pvals, nrow = ncol(x), ncol = ncol(y))
+by_cna_adj_pvals <- matrix(data = by_cna_adj_pvals, nrow = ncol(x), ncol = ncol(y))
+thresh <- 0.01
+global_sig_cor <- global_adj_pvals <= thresh
+nsig_global_sig_cor_by_cna <- rowSums(global_sig_cor)
+nsig_by_cna_sig_cor_by_cna <- rowSums(by_cna_adj_pvals)
+summary(nsig_global_sig_cor_by_cna)
+qplot(nsig_global_sig_cor_by_cna, geom = "histogram", bins = 50) + xlab("Significant Correlation by CNA (Global adjustment")
+qplot(nsig_by_cna_sig_cor_by_cna, geom = "histogram", bins = 50) + xlab("Significant Correlation by CNA (Adjust within CNA)")
+```
+
+
+```{r}
+sum(nsig_global_sig_cor_by_cna)
+```
+
+
+Which are the major hubs in the marginal analysis? 
+
+```{r}
+degree_thresh <- 50
+cbind(fData(xset)$alias[which(nsig_global_sig_cor_by_cna > degree_thresh)],
+      nsig_global_sig_cor_by_cna[which(nsig_global_sig_cor_by_cna > degree_thresh)])
+```
+
+
+```{r}
+gap <- global_adj_pvals
+
+xa <- fData(xset)
+ya <- fData(yset)
+
+xchr_num <- as.integer(sub("chr", "", xa$chr))
+ychr_num <- as.integer(sub("chr", "", ya$chr))
+oya <- order(ychr_num, ya$start)
+oxa <- order(xchr_num, xa$start)
+ogap <- gap[oxa,oya]
+oxycor <- xycor[oxa,oya]
+soxycor <- oxycor
+soxycor[ogap > 0.01] <- 0.0
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
+```

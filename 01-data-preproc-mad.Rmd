@@ -1,0 +1,490 @@
+---
+title: "Data Pre-processing for Proteogenomics of Ovarian Cancer"
+author: "Christopher Conley, Pei Wang, Umut Ozbek, Jie Peng"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+The following analysis documents how we organize the Ovarian discovery data set 
+
+## Copy Number Alteration (CNA) data
+
+The raw data for this project is currently stored locally to keep the file size down.
+
+```{r}
+s2dir <- "~/scratch-data/neta-poc/cell-paper-table-s2-data/"
+```
+
+We will store the intermediate filtered data here: 
+
+```{r}
+priordir <- "~/scratch-data/neta-poc/filtered-s2-data/"
+filterdir <- "~/scratch-data/neta-poc/mad-filtered-s2-data/"
+```
+
+We now import and validate the data.
+
+```{r}
+cna0 <- new.env()
+load(envir = cna0, file = file.path(priordir, "TCGA_OV169_CNA_170725.Rdata"))
+```
+
+The Fixed-order clustering algorithm determined 1351 CNA intervals in the TCGA data set . As seen in the  following object, there are 169 samples that have METABRIC sample ID's in the column names and the CNA intervals are contained in the rows. 
+
+```{r}
+str(cna0$CNA.FOC.data.new)
+```
+
+The specific gene coordinates of these 1351 CNA intervals are reported as well (see next object).
+
+```{r}
+#assure equal dimension
+stopifnot(nrow(cna0$CNA.FOC.loca.new) == nrow(cna0$CNA.FOC.data.new))
+kable(head(cna0$CNA.FOC.loca.new))
+```
+
+### Cytoband redundancy
+
+The cytoband information is reported in the following object: 
+
+```{r}
+stopifnot(length(cna0$CNA.FOC.n.new) == nrow(cna0$CNA.FOC.data.new))
+head(cna0$CNA.FOC.n.new)
+```
+
+Notice there is a bit of redundancy in the cytoband intervals. Improve the cytoband information to be as non-redundant as possible through the following function. 
+
+```{r}
+nr_cytobands <- function(cb) { 
+  split_cb <- unlist(strsplit(x = cb, split = "-"))
+  if(length(split_cb) != 2) { 
+    return(cb)
+  }
+
+  split_cb2 <- unlist(strsplit(x = split_cb, split = "p|q"))
+  pq1 <- regmatches(split_cb[1], m= regexpr(pattern = "[pq]+", text = split_cb[1])) 
+  pq2 <- regmatches(split_cb[2], m= regexpr(pattern = "[pq]+", text = split_cb[2])) 
+  same_arm <- pq1 == pq2
+  chr1 <- split_cb2[1]
+  chr2 <- split_cb2[3]
+  same_chr <- chr1 == chr2
+  loc1 <- as.numeric(split_cb2[2])
+  loc2 <- as.numeric(split_cb2[4])
+  same_loc <- loc1 == loc2
+  
+  if( same_chr & same_arm & same_loc) { 
+    paste0(chr1, pq1, loc1)
+  } else if (same_chr & same_arm & !same_loc) {
+    paste0(chr1, pq1, min(loc1,loc2), "-", max(loc1,loc2))
+  } else if (same_chr & !same_arm & same_loc) { 
+    paste0(chr1, pq1, loc1, "-", pq2, loc2)
+  } else if (same_chr & !same_arm & !same_loc) { 
+    paste0(chr1, pq1, loc1, "-", chr2, pq2, loc2)
+  } else if (!same_chr) { 
+    paste0(chr1, pq1, loc1, "-", chr2, pq2, loc2)
+  }
+}
+tmp <- data.frame(original = cna0$CNA.FOC.n.new,
+                  nr = sapply(cna0$CNA.FOC.n.new, nr_cytobands))
+nr_cytoband_ids <- as.character(tmp$nr)
+```
+
+Inspection of the cytoband information reveals that the redundancy has been reduced. 
+
+```{r}
+kable(tmp[sample.int(n = nrow(tmp), size = 6),])
+```
+
+### CNA ExpressionSet
+
+Since the cytoband information is not unique we will form unique ID's for the CNA features based on the gene coordinates. 
+
+```{r}
+cnapos <- cna0$CNA.FOC.loca.new[,c("ch.interval.iter3", "begin.nuc.iter3", "end.nuc.iter3")]
+cnaids <- apply( cnapos, 1 , paste , collapse = "_" )
+stopifnot(!anyDuplicated(cnaids))
+head(cnaids)
+```
+
+
+Store the CNA attributes in a way that will be compatible with spacemap's network analysis toolkit. The CNA attributes must have a unique feature ID, an alias that can be displayed in downstream visualizations, the and the genomic coordinates. 
+
+```{r}
+cna_node_attributes <- data.frame(id = cnaids,
+                                 alias = nr_cytoband_ids,
+                                 chr = paste0("chr", cnapos[,"ch.interval.iter3"]),
+                                 start =  cnapos[,"begin.nuc.iter3"],
+                                 end = cnapos[,"end.nuc.iter3"],
+                                 stringsAsFactors = FALSE, 
+                                 row.names = cnaids)
+kable(head(cna_node_attributes), row.names = F)
+```
+
+Now label the CNA features with their newly formed IDs in the assay data.  
+
+```{r}
+cna_assay <- cna0$CNA.FOC.data.new
+rownames(cna_assay) <- cnaids
+colnames(cna_assay) <- substring(text = colnames(cna_assay), 1, 12)
+str(cna_assay)
+```
+
+We combine the CNA interval data with the clinical variables and CNA attributes into an `ExpressionSet` object. 
+
+```{r}
+suppressPackageStartupMessages(library(Biobase))
+cnaset <- ExpressionSet(assayData = cna_assay, 
+                        featureData = AnnotatedDataFrame(data = cna_node_attributes))
+saveRDS(object = cnaset, file = file.path(filterdir, "poc-cna-eset.rds"))
+cnaset
+```
+
+
+
+## Variable Proteomics Data
+
+Import the "VariableProteomeOvarianData" from table S2, sheet 2. Keep the genes for downstream analysis that are in the top 60% of standard deviations. This leaves 2151 features for the 169 samples. 
+
+```{r}
+library(readr)
+vpoc <- read_csv(file = "~/scratch-data/neta-poc/cell-paper-table-s2-data/VariableProteomeOvarianData.csv")
+vpoc_samples <- colnames(vpoc)[3:ncol(vpoc)]
+ed <- as.matrix(vpoc[,vpoc_samples])
+rownames(ed) <- vpoc$refseq_peptide
+#initial feature information
+fd <-  data.frame( RefSeqProteinID = vpoc$refseq_peptide, 
+                   row.names = vpoc$refseq_peptide)
+vpocset <- ExpressionSet(assayData = ed,
+                         featureData = AnnotatedDataFrame(data = fd))
+pexp <- exprs(vpocset)
+#no missing proteins
+stopifnot(!any(is.na(pexp)))
+sd_pexp <- apply(X = pexp, MARGIN = 1, FUN = sd)
+mad_pexp <- apply(X = pexp, MARGIN = 1, FUN = mad)
+mean_pexp <- apply(X = pexp, MARGIN = 1, FUN = mean)
+keep_prot_index <- mad_pexp > quantile(x = mad_pexp, probs = 0.60)
+protmad <- vpocset[which(keep_prot_index),]
+#no duplicated refseq ids
+stopifnot(!anyDuplicated(featureNames(protmad)))
+```
+
+The mean-variance relationship of the protein data is as follows. 
+
+```{r}
+library(ggplot2)
+qplot(mean_pexp, mad_pexp, geom = "point") + theme_bw() 
+```
+
+The standard deviation and the median absolute deviation are very correlated. 
+
+```{r}
+qplot(sd_pexp, mad_pexp, geom = "point") + theme_bw() 
+```
+
+Add annotation attributes for the protein features. 
+
+```{r}
+library(annotate)
+library(biomaRt)
+ensembl = useMart("ensembl",dataset="hsapiens_gene_ensembl")
+filters = listFilters(ensembl)
+refseqids=featureNames(protmad)
+prot_node_attr <- getBM(attributes = c('refseq_peptide', 'hgnc_symbol', 'chromosome_name',
+                                       'start_position', 'end_position', 'band'),
+                        filters = 'refseq_peptide', 
+                        values = refseqids, 
+                        mart = ensembl)
+knitr::kable(head(prot_node_attr), row.names = F)
+```
+
+
+Handle duplicate and missing annotations.
+
+```{r}
+dupids <- prot_node_attr$refseq_peptide[which(duplicated(prot_node_attr$refseq_peptide))]
+must_dedup_index <- prot_node_attr$refseq_peptide %in% dupids
+#View(prot_node_attr[must_dedup_index,])
+must_dedup <- prot_node_attr[must_dedup_index,]
+must_dedup_group <- split(x = must_dedup, 
+                          f = as.factor(must_dedup$refseq_peptide))
+suppressPackageStartupMessages(library(data.table))
+fclean_dups <- function(i) { 
+  j <- grep("CHR_", must_dedup_group[[i]]$chromosome_name, invert = T)  
+    #HLA locus
+  if (length(j) < 1) { 
+    j <- sample.int(1, 1)
+  }
+  must_dedup_group[[i]][j,]
+} 
+library(data.table)
+clean_dups <- lapply(seq_along(must_dedup_group), fclean_dups) 
+#further_inspect <- must_dedup_group[which(sapply(clean_dups, nrow) == 0)]
+clean_dups <- as.data.frame(rbindlist(clean_dups))
+
+#missing attributes for some features
+miss_prot_attr <- data.frame(refseq_peptide = refseqids[!(refseqids %in% prot_node_attr$refseq_peptide)],
+                             hgnc_symbol = NA, 
+                             chromosome_name = NA, 
+                             start_position = NA, 
+                             end_position = NA, 
+                             band = NA)
+
+#combine non-duplicated, de-duplicated, missing attributes
+cleaned_prot_attr <- rbind(prot_node_attr[!must_dedup_index,], clean_dups, miss_prot_attr)
+#match the correct order as the eset feature names
+prot_node_attr_final <- cleaned_prot_attr[match(featureNames(protmad), cleaned_prot_attr$refseq_peptide),]
+#View(prot_node_attr_final)
+metaData <- data.frame(labelDescription= colnames(prot_node_attr_final))
+colnames(prot_node_attr_final) <- c("id", "alias", "chr", "start", "end", "cytoband")
+featureData(protmad) <- AnnotatedDataFrame(data = prot_node_attr_final, 
+                                     varMetadata = metaData)
+protmad
+```
+
+## Outlier Analysis
+
+[Filzmoser et al.](http://dx.doi.org/10.1016/j.csda.2007.05.018) introduced a method called `PCOut` for outlier detection in high dimension that is computationally fast. It is implemented in the CRAN package [mvoutlier](https://github.com/cran/mvoutlier/blob/master/R/pcout.R) and leverages a semi-robust principal component decomposition to identify outliers of two types: those samples that differ in their location parameter from the rest of the samples and those that differ in their scatter (scale). We applied `PCout` for each subtype.
+
+The wrapper function `outlier_analysis` performs outlier analysis for each subtype on the standardized data.
+
+```{r}
+suppressPackageStartupMessages(library(mvoutlier))
+suppressPackageStartupMessages(library(Biobase))
+prot_pco <- pcout(x = t(exprs(protmad)))
+cna_pco <-  pcout(x = t(exprs(cnaset)))
+```
+
+Visualize the outliers for each subtype and report the ratio of potential outliers to total samples. 
+
+```{r, fig.show='hold'}
+library(ggplot2)
+plot_outliers <- function(pco) { 
+  ggdat <- data.frame(outlier = ifelse(pco$wfinal01 == 0, "potential outlier", "non-outlier"),
+                      loc = pco$x.dist1,
+                      scat = pco$x.dist2
+                      )
+  ggplot(data = ggdat, aes(x = loc, y = scat, colour = outlier)) + 
+    geom_point() + theme_bw() + 
+    xlab("Location Distance") + ylab("Scatter Distance")
+}
+
+oa_fig <- function(o, loa) { 
+  plot_outliers(loa[[o]]) + 
+    ggtitle(paste0(subtypes[o], ": ", 
+                   sum(loa[[o]]$wfinal01 == 0), " / ", 
+                   length(loa[[o]]$wfinal01)))
+}
+
+plot_outliers(cna_pco) + ggtitle("CNA Outlier Analysis")
+plot_outliers(prot_pco) + ggtitle("Protein Outlier Analysis")
+```
+
+Identify the sample ID of the the most extreme outliers. 
+
+```{r}
+outlier_by_loc <- function(loa, thresh_loc) { 
+  ids_sorted <- sort(loa$x.dist1, 
+                     index.return = T, decreasing = T)
+  out_ids <- names(ids_sorted$x[ids_sorted$x > thresh_loc])
+  out_ids
+}
+#thresholds
+protein_outliers <- outlier_by_loc(prot_pco, 30)
+cna_outliers <-  outlier_by_loc(cna_pco, 19.5)
+```
+
+We decided to remove the most extreme outlier just from the protein for now. 
+
+```{r}
+#assert sample names match
+stopifnot(sampleNames(protmad) == sampleNames(cnaset))
+protmad <- protmad[,!(sampleNames(protmad) %in% protein_outliers)]
+cnaset <- cnaset[,!(sampleNames(cnaset) %in% protein_outliers)]
+stopifnot(sampleNames(protmad) == sampleNames(cnaset))
+```
+
+### Highly Correlated CNA
+
+Use the same [density-based scan clustering algorithm](https://rdrr.io/cran/fpc/man/dbscan.html) as was done in the network analysis of [BCPLS](https://topherconley.github.io/neta-bcpls/data.html) to find ultra-correlated CNA. We assured that the ultra-correlated CNA pairs were within 4 Mb. This reflects the spatial correlation of these features.  If there is a group of ultra-correlated CNA features, we take just one of the features and drop the other features in the group from the data set. However, we make a note the dropped CNA features through the `clustered_with` attribute of the CNA feature that was kept in the CNA ExpressionSets. 
+
+```{r}
+hc_cna <- function(eset) {
+  
+  X <- t(exprs(eset))
+  library(fpc)
+  dR <- 1 - abs(cor(X))
+  clout <- fpc::dbscan(data = dR, MinPts = 2, eps = 1e-3, method = "dist")
+  
+  suppressWarnings(library(stringdist))
+  library(foreach)
+  clusterDistr <- as.data.frame(table(clout$cluster), stringAsFactors = FALSE)
+  #Cluster `0` corresponds to sufficiently independent CNA's.
+  #Omit it from the multi-colinear analysis.
+  if(nrow(clusterDistr) == 1) { 
+    #nothing clustered
+    exprs(eset) <- t(scale(t(exprs(eset))))
+    saveRDS(object = eset, 
+            file = file.path(filterdir,"poc-cna-eset-nodropout-std.rds"))
+    return(eset)
+  }
+  mcolinear <- clusterDistr$Var1[2:nrow(clusterDistr)]
+  
+  namesMultiCol <- foreach(i = seq_along(mcolinear)) %do% {
+    colnames(X[,clout$cluster == mcolinear[i]])
+  }
+  
+  #assure that those being collapsed are within 4Mb of each other
+  #note: all subtypes, except Normal-Like collapse features 
+  #that are within .5 Mb of each other.
+  toResolve <- namesMultiCol
+  simdist <- function(x) { 
+    coords <- pData(featureData(eset[x,]))
+    last <- nrow(coords)
+    if(coords$chr[1] != coords$chr[last]) { 
+      FALSE
+    } else { 
+      (coords$start[last] - coords$end[1]) < 4e6  
+    }
+  }
+  stopifnot(all(sapply(toResolve, simdist)))
+  
+  keep <- sapply(toResolve, function(x) x[1])
+  as_clustered <- sapply(toResolve, function(x) x[2:length(x)])
+  drop_clustered <- unlist(as_clustered)
+  eset2 <- eset[!(featureNames(eset) %in% drop_clustered),]
+  fd2 <- pData(featureData(eset2))
+  fd2$clustered_with <- NA
+  fd2$clustered_with[fd2$id %in% keep] <- sapply(as_clustered, 
+                                                 function(x)
+                                                   paste0(x, collapse = "; "))
+  eset2@featureData <- AnnotatedDataFrame(fd2)
+  #standardize after -> no outliers -> no multicolinearity
+  exprs(eset2) <- t(scale(t(exprs(eset2))))
+  saveRDS(object = eset2, 
+          file = file.path(filterdir, 
+                           "poc-cna-eset-dropout-std.rds"))
+  eset2
+}
+cnaset <- hc_cna(cnaset)
+```
+
+There is only two pairs of highly correlated CNA that was reduced. 
+
+```{r}
+tmp <- fData(cnaset)
+tmp[!is.na(tmp$clustered_with),]
+```
+
+### Highly Correlated Proteins
+
+Identify the number of highly correlated proteins (pairwise correlation exceeding 0.999) for each subtype and report how many highly correlated proteins come from the same gene. 
+
+```{r}
+hc_probes <- function(eset, thresh =  0.999) { 
+ 
+  expression <- t(exprs(eset))
+  coro <- cor(x = expression)
+  p <- nrow(coro)
+  pcoro <- list()
+  cntr <- 1
+  for(i in 1:(p - 1)) {
+    for(j in (i + 1):p) {
+      if(coro[i,j] > thresh) { 
+        pcoro[[cntr]] <- c(i,j)
+        cntr <- cntr + 1
+      }  
+        
+    }
+  }
+
+  fd <- featureData(eset)
+  fd <- fd@data
+  alias <- fd$alias
+  id <- fd$id
+  if (length(pcoro) > 0 ) { 
+    dup <- sapply(pcoro, function(pc) anyDuplicated(alias[pc]) > 0)
+    if (sum(dup) > 0 ) { 
+      dalias <- sapply(pcoro[dup], function(pc) alias[pc[1]])  
+    } else { 
+      dalias <- NA  
+    }
+  } else { 
+    dup <- vector()
+    dalias <- NA
+  }
+  
+  list(
+    hcp = pcoro, 
+    dup = dup,
+    ndup = sum(dup), 
+    nhcp = length(dup), 
+    alias = dalias)
+}
+hc_protmad <- hc_probes(protmad)
+library(data.table)
+hcp <- rbindlist(lapply(hc_protmad$hcp, function(x) data.frame(i = x[1], j = x[2])))
+palias <- fData(protmad)$alias
+hcp$alias_i <- palias[hcp$i]
+hcp$alias_j <- palias[hcp$j]
+hcp$not_isoforms <- hcp$alias_i != hcp$alias_j
+```
+
+Leave the highly correlated isoform pairs as they are.  
+
+```{r}
+#standardize after -> no outliers -> no multicolinearity
+exprs(protmad) <- t(scale(t(exprs(protmad))))
+saveRDS(object = protmad, 
+        file = file.path(filterdir, 
+                         "poc-prot-eset-dropout-std.rds"))
+```
+
+Drop one isoform of highly correlated protein isoform pairs at random. 
+
+```{r}
+set.seed(243)
+drop_at_random <- hc_protmad$hcp[hc_protmad$dup]
+drop_at_random <- sapply(drop_at_random, function(x) sample(x, 1))
+```
+
+## Cross Validation Folds
+
+Partition samples into mutually exclusive test sets. We do not balance the samples of the test sets with any clinical covariate. 
+
+```{r}
+set.seed(370053)
+k <- 10
+#install.packages("caret", dependencies = T)
+suppressPackageStartupMessages(library(caret))
+N <- ncol(protmad)
+#dummy class
+dummy_class <- sample(x = c("A","B"), size = N, replace = TRUE)
+test_set <- createFolds(y = dummy_class, k = k)
+test_set_len <- sapply(test_set, length)
+train_set <- lapply(test_set, function(fold) setdiff(1:N, fold))
+train_set_len <- sapply(train_set, length)
+#assert no overlap
+stopifnot(length(intersect(train_set$Fold01, test_set$Fold01)) == 0)
+saveRDS(object = test_set, 
+        file = file.path(filterdir, paste0("test_sets", 
+                                           ".rds")))
+saveRDS(object = train_set, 
+        file = file.path(filterdir, paste0("train_sets", 
+                                            ".rds")))
+```
+
+
+## Session Info
+
+```{r}
+sessionInfo()
+```
+
