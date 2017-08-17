@@ -27,7 +27,7 @@ if (comp == "gauss") {
   }
   
   library(doParallel)
-  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_01.txt")
+  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_02.txt")
   print(nodelist)
   cl <- makePSOCKcluster(nodelist, outfile='')
   registerDoParallel(cl)
@@ -80,10 +80,10 @@ testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 ##################
 
 #GRID
-tmap <- expand.grid(lam1 = exp(seq(log(100), log(200), length = 50)))
+tmap <- expand.grid(lam1 = exp(seq(log(45), log(100), length = 50)))
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/pnnl-mad-tuning/01"
+respath <- "/home/cconley/scratch-data/neta-poc/pnnl-mad-tuning/02"
 if (!dir.exists(respath)) { 
   system(paste("mkdir -p", respath))  
 }
@@ -94,5 +94,5 @@ tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
                                                   method = "space", tuneGrid = tmap, 
                                                   resPath = respath,
                                                   tol = 1e-4, cdmax = 90e7)})
-save.image(file = file.path(respath, "poc-space-01.rda"))
+save.image(file = file.path(respath, "poc-space-02.rda"))
 stopCluster(cl)

@@ -27,7 +27,7 @@ if (comp == "gauss") {
   }
   
   library(doParallel)
-  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_01.txt")
+  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_03.txt")
   print(nodelist)
   cl <- makePSOCKcluster(nodelist, outfile='')
   registerDoParallel(cl)
@@ -44,8 +44,8 @@ if (comp == "gauss") {
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/cconley/scratch-data/neta-poc/pnnl-mad-filtered"
-#filterdir <- "~/scratch-data/neta-poc/pnnl-mad-filtered"
+filterdir <- "/home/cconley/scratch-data/neta-poc/mad-filtered-s2-data"
+#filterdir <- "~/scratch-data/neta-poc/mad-filtered-s2-data"
 fy <- "poc-prot-eset-dropout-std.rds"
 fx <- "poc-cna-eset-dropout-std.rds"
 library(Biobase)
@@ -80,10 +80,10 @@ testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 ##################
 
 #GRID
-tmap <- expand.grid(lam1 = exp(seq(log(100), log(200), length = 50)))
+tmap <- expand.grid(lam1 = exp(seq(log(200), log(300), length = 100)))
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/pnnl-mad-tuning/01"
+respath <- "/home/cconley/scratch-data/neta-poc/mad-tuning/03"
 if (!dir.exists(respath)) { 
   system(paste("mkdir -p", respath))  
 }
@@ -94,5 +94,5 @@ tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
                                                   method = "space", tuneGrid = tmap, 
                                                   resPath = respath,
                                                   tol = 1e-4, cdmax = 90e7)})
-save.image(file = file.path(respath, "poc-space-01.rda"))
+save.image(file = file.path(respath, "poc-space-03.rda"))
 stopCluster(cl)
