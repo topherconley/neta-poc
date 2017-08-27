@@ -44,8 +44,7 @@ if (comp == "gauss") {
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered"
-#filterdir <- "~/scratch-data/neta-poc/nohc-mad-filtered"
+filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered/"
 fy <- "poc-prot-eset-dropout-std.rds"
 fx <- "poc-cna-eset-dropout-std.rds"
 library(Biobase)
@@ -76,24 +75,27 @@ trainSets <- readRDS(file.path(filterdir, "train_sets.rds"))
 testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 
 ##################
-#   TRY O1       #
+#   TRY 04       #
 ##################
 
-#GRID
-tmap <- expand.grid(lam1 = seq(100, 250, length = 50))
+
+tmap <- expand.grid(lam1 = seq(sqrt(130), sqrt(138), length = 10)^2,
+                    lam2 = seq(sqrt(43), sqrt(50), length = 10)^2,
+                    lam3 = seq(sqrt(0), sqrt(30), length = 10)^2)
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-tuning/01"
+respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-tuning/04"
 if (!dir.exists(respath)) { 
   system(paste("mkdir -p", respath))  
 }
 
 library(spacemap)
-tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
-                                                  trainIds = trainSets, testIds = testSets, 
-                                                  method = "space", tuneGrid = tmap, 
-                                                  resPath = respath,
-                                                  tol = 1e-4, cdmax = 90e7,
-						  refitRidge = 0.1)})
-save.image(file = file.path(respath, "poc-space-01.rda"))
+tictoc <- system.time({cvsmap <- cvVote(Y = Y, X = X,
+                                        trainIds = trainSets, testIds = testSets,
+                                        method = "spacemap", tuneGrid = tmap,
+                                        resPath = respath,
+                                        tol = 1e-4, cdmax = 20e7,
+					refitRidge = 0.1)})
+
+save.image(file = file.path(respath, "poc-spacemap-04.rda"))
 stopCluster(cl)

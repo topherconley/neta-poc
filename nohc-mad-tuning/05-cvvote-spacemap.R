@@ -44,8 +44,7 @@ if (comp == "gauss") {
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered"
-#filterdir <- "~/scratch-data/neta-poc/nohc-mad-filtered"
+filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered/"
 fy <- "poc-prot-eset-dropout-std.rds"
 fx <- "poc-cna-eset-dropout-std.rds"
 library(Biobase)
@@ -76,24 +75,25 @@ trainSets <- readRDS(file.path(filterdir, "train_sets.rds"))
 testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 
 ##################
-#   TRY O1       #
+#   TRY 05       #
 ##################
 
-#GRID
-tmap <- expand.grid(lam1 = seq(100, 250, length = 50))
-
+tmap <- expand.grid(lam1 = c(131.7571, seq(131, 132.2, length = 5)),
+                    lam2 = c(44.50996, seq(43.9, 45, length = 5)),
+                    lam3 = seq(4, 8, length = 6))
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-tuning/01"
+respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-tuning/05"
 if (!dir.exists(respath)) { 
   system(paste("mkdir -p", respath))  
 }
 
 library(spacemap)
-tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
-                                                  trainIds = trainSets, testIds = testSets, 
-                                                  method = "space", tuneGrid = tmap, 
-                                                  resPath = respath,
-                                                  tol = 1e-4, cdmax = 90e7,
-						  refitRidge = 0.1)})
-save.image(file = file.path(respath, "poc-space-01.rda"))
+tictoc <- system.time({cvsmap <- cvVote(Y = Y, X = X,
+                                        trainIds = trainSets, testIds = testSets,
+                                        method = "spacemap", tuneGrid = tmap,
+                                        resPath = respath,
+                                        tol = 1e-4, cdmax = 20e7,
+					refitRidge = 0.1)})
+
+save.image(file = file.path(respath, "poc-spacemap-05.rda"))
 stopCluster(cl)
