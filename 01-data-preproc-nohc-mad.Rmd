@@ -378,17 +378,67 @@ cnaset <- hc_cna(cnaset)
 
 There is only two pairs of highly correlated CNA that was reduced. 
 
-```{r}
+```{r, echo = F, eval = F}
 tmp <- fData(cnaset)
 tmp[!is.na(tmp$clustered_with),]
 ```
 
 ### Highly Correlated Proteins
 
-Identify the number of highly correlated proteins (pairwise correlation exceeding 0.999) for each subtype and report how many highly correlated proteins come from the same gene. 
+Cluster the proteins in the same fashion as the CNA features. 
 
 ```{r}
-hc_probes <- function(eset, thresh =  0.999) { 
+hc_proteins <- function(eset) { 
+  X <- t(exprs(eset))
+  library(fpc)
+  dR <- 1 - abs(cor(X))
+  clout <- fpc::dbscan(data = dR, MinPts = 2, eps = 1e-3, method = "dist")
+  
+  suppressWarnings(library(stringdist))
+  library(foreach)
+  clusterDistr <- as.data.frame(table(clout$cluster), stringAsFactors = FALSE)
+  #Cluster `0` corresponds to sufficiently independent CNA's.
+  #Omit it from the multi-colinear analysis.
+  mcolinear <- clusterDistr$Var1[2:nrow(clusterDistr)]
+  
+  sym <-fData(eset)$alias
+  id <-fData(eset)$id
+  namesMultiCol <- foreach(i = seq_along(mcolinear)) %do% {
+    id[clout$cluster == mcolinear[i]]
+  }
+  
+  #sum(unique(unlist(namesMultiCol)) %in% c(hcp$alias_j, hcp$alias_i))
+  toResolve <- namesMultiCol
+  keep <- sapply(toResolve, function(x) x[1])
+  as_clustered <- sapply(toResolve, function(x) x[2:length(x)])
+  drop_clustered <- unlist(as_clustered)
+  eset2 <- eset[!(featureNames(eset) %in% drop_clustered),]
+  fd2 <- pData(featureData(eset2))
+  fd2$clustered_with <- NA
+  fd2$clustered_with[fd2$id %in% keep] <- sapply(as_clustered, 
+                                                 function(x)
+                                                   paste0(x, collapse = "; "))
+  eset2@featureData <- AnnotatedDataFrame(fd2)
+  #standardize after -> no outliers -> no multicolinearity
+  exprs(eset2) <- t(scale(t(exprs(eset2))))
+  saveRDS(object = eset2, 
+          file = file.path(filterdir, 
+                           "poc-prot-eset-dropout-std.rds"))
+  eset2
+}
+protmad <- hc_proteins(protmad)
+```
+
+```{r, echo = F}
+tmp <- fData(protmad)
+nclustered <- nrow(tmp[!is.na(tmp$clustered_with),])
+```
+
+There are `r nclustered` clusters of protein isoforms, where only one isoform was selected as representative of the gene. It was verified that after this clustering there are no remaining features that have correlation exceeding 0.999. 
+
+```{r, echo = F, eval = F}
+#Identify the number of highly correlated proteins (pairwise correlation exceeding 0.999) for each subtype and report how many highly correlated proteins come from the same gene. 
+hc_proteins_manual <- function(eset, thresh =  0.999) { 
  
   expression <- t(exprs(eset))
   coro <- cor(x = expression)
@@ -421,48 +471,28 @@ hc_probes <- function(eset, thresh =  0.999) {
     dalias <- NA
   }
   
+  corr <- sapply(pcoro, function(idx) cor(expression[,idx[1]], expression[,idx[2]]))
+  
   list(
+    corr = corr,
     hcp = pcoro, 
     dup = dup,
     ndup = sum(dup), 
     nhcp = length(dup), 
     alias = dalias)
 }
-hc_protmad <- hc_probes(protmad)
-library(data.table)
-hcp <- rbindlist(lapply(hc_protmad$hcp, function(x) data.frame(i = x[1], j = x[2])))
-palias <- fData(protmad)$alias
-hcp$alias_i <- palias[hcp$i]
-hcp$alias_j <- palias[hcp$j]
-hcp$not_isoforms <- hcp$alias_i != hcp$alias_j
-```
-
-Leave the highly correlated isoform pairs as they are.  
-
-```{r}
-#standardize after -> no outliers -> no multicolinearity
-exprs(protmad) <- t(scale(t(exprs(protmad))))
-saveRDS(object = protmad, 
-        file = file.path(filterdir, 
-                         "poc-prot-eset-dropout-std.rds"))
-```
-
-Drop one isoform of highly correlated protein isoform pairs at random. 
-
-```{r}
-set.seed(243)
-drop_at_random <- hc_protmad$hcp[hc_protmad$dup]
-drop_at_random <- sapply(drop_at_random, function(x) sample(x, 1))
-```
-
-```{r}
-#standardize after -> no outliers -> no multicolinearity
-nohc_index <- sort(unique(unlist(hc_protmad$hcp)))
-protmad <- protmad[-nohc_index,]
-exprs(protmad) <- t(scale(t(exprs(protmad))))
-saveRDS(object = protmad, 
-        file = file.path(filterdir, 
-                         "poc-prot-eset-dropout-nohcprot-std.rds"))
+# hc_protmad <- hc_probes(protmad)
+# library(data.table)
+# hcp <- rbindlist(lapply(hc_protmad$hcp, function(x) data.frame(i = x[1], j = x[2])))
+# palias <- fData(protmad)$alias
+# hcp$alias_i <- palias[hcp$i]
+# hcp$alias_j <- palias[hcp$j]
+# hcp$isoforms <- hcp$alias_i == hcp$alias_j
+# hcp$corr <- hc_protmad$corr
+# hcp <- hcp[order(hcp$alias_i),]
+# by_isoform <- split(hcp, hcp$alias_i)
+# library(readr)
+# write_excel_csv(x = hcp, path = file.path(filterdir, "highly-correlated-pairs.csv"))
 ```
 
 ## Cross Validation Folds
