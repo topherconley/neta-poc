@@ -1,0 +1,166 @@
+---
+title: "Annotation of BCPLS"
+author: "Christopher Conley, Pei Wang, Jie Peng"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+Annotation of gene features is very application specific. In this document, we illustrate how we mapped biological processes from the Gene Ontology (GO) onto protein and RNA expressions. A Gene Ontology (GO) universe is defined to be all the biological processess specifically found among the protein and mRNA features used as input to spaceMap. This document shows how the GO universes were constructed for downstrem GO-enrichment analysis of network modules for the networks `prot-net` and `RNA-net` in the spaceMap publication.
+
+## Previous Annotations
+
+In processing the mRNA and protein expression data from [step 1](https://topherconley.github.io/neta-bcpls/data.html), we already have formed gene coordinate annotations. These are stored in the `ExpresionSet` objects. The existing protein annotations are accessed as follows:
+
+```{r}
+suppressPackageStartupMessages(library(Biobase))
+protset <- readRDS(file = "~/scratch-data/neta-poc/nohc-mad-filtered/poc-prot-eset-dropout-std.rds")
+protinfo <- pData(featureData(protset))
+```
+
+```{r, eval=FALSE}
+head(protinfo)
+```
+
+```{r, echo=FALSE}
+kable(head(protinfo), row.names = FALSE)
+```
+
+In similary fashion, we can access the mRNA and CNA annotations. Now we focus on establishing a map from GO terms to features, which will be stored in list format because the mapping is not 1-to-1. 
+
+## Protein GO universe
+
+Load the protein features and map their identiers from RefSeq accessions to entrez gene accessions. We need the entrez gene accessions to map to the Gene Ontology. 
+
+```{r,eval=FALSE}
+suppressPackageStartupMessages(library(mygene))
+p2r77map <- queryMany(qterms = featureNames(protset), scopes = "refseq",
+                      fields = c("entrezgene"))
+p2r77map2 <- data.frame(refseq = p2r77map@listData$query, entrezgene = p2r77map@listData$entrezgene)
+saveRDS(p2r77map2, file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-refseq-to-entrezgene-map.rds")
+```
+
+```{r, echo = FALSE}
+#do not need to query again for entrez gene mapping from refseq
+p2r77map2 <- readRDS(file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-refseq-to-entrezgene-map.rds")
+```
+
+Get the entrez genes with GO mappings. 
+
+```{r}
+suppressMessages(library(org.Hs.eg.db))
+x <- org.Hs.egGO
+hs_feature_list <- function(db, eg) { 
+  mk <- mappedkeys(db)
+  xx <- as.list(db[eg[eg %in% mk]])
+}
+# Get the entrez gene identifiers that are mapped to a GO ID
+mapped_genes <- mappedkeys(x)
+entrezgene.qe.go <- as.character(p2r77map2$entrezgene[ p2r77map2$entrezgene %in% mapped_genes])
+leg2go <-  hs_feature_list(db = org.Hs.egGO, eg = entrezgene.qe.go) 
+```
+
+Map the entrez genes to GO biological process terms with some valid evidence (i.e. not "ND").
+
+```{r}
+suppressPackageStartupMessages(library(foreach))
+leg2go_filtered <- foreach(got = leg2go, eg = names(leg2go)) %do% { 
+  bp_domain <- sapply(got, function(x) x[["Ontology"]]) == "BP"
+  #bp_domain <- TRUE
+  not_nd_domain <- sapply(got, function(x) x[["Evidence"]]) != "ND"
+  bp_got <- got[bp_domain & not_nd_domain]
+  sapply(bp_got, function(x) x[["GOID"]]) 
+}
+names(leg2go_filtered) <- names(leg2go)
+leg2go_filtered <- leg2go_filtered[sapply(leg2go_filtered, length) != 0]
+```
+
+Reverse the mapping so that the key is a GO biological process and the values are a character vector of RefSeq accessions. Keep those keys that have at least 15 but no more than 300 RefSeq accessions. 
+
+```{r}
+suppressMessages(library(topGO))
+go2eg <- inverseList(leg2go_filtered)
+#switch to refseq id because of graph id and to include all isoforms
+go2eg <- lapply(go2eg, function(x) as.character(p2r77map2$refseq[ p2r77map2$entrezgene %in% x ]))
+#remove duplicate entrez genes
+go2eg <- lapply(go2eg, function(x) x[!duplicated(x)])
+#saveRDS(go2eg, file = "~/repos/neta-bccptac/data/no-len-trim-prot-go-bp-to-entrez-gene-list.rds")
+gosize <- sapply(go2eg, length)
+go2eg <- go2eg[ gosize >= 15 & gosize <= 300]
+#assure each go term has a list of non-duplicate ids
+stopifnot(all(sapply(go2eg, anyDuplicated) == 0))
+eg2go <- inverseList(go2eg)
+```
+
+Save the protein GO universe.
+
+```{r, eval = FALSE}
+saveRDS(go2eg, file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-go-bp-to-entrez-gene-list.rds")
+saveRDS(eg2go, file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-go-entrez-gene-to-bp-list.rds")
+```
+
+
+## MSigDB
+
+```{r}
+msig_import <- function(file) { 
+  c1 <- qusage::read.gmt(file)
+  #switch to refseq id because of graph id and to include all isoforms
+  c1 <- lapply(c1, function(x) as.character(p2r77map2$refseq[ p2r77map2$entrezgene %in% x ]))
+  #remove duplicate entrez genes
+  c1 <- lapply(c1, function(x) x[!duplicated(x)])
+  c1_size <- sapply(c1, length)
+  c1 <- c1[ c1_size >= 15 ]
+  #assure each go term has a list of non-duplicate ids
+  stopifnot(all(sapply(c1, anyDuplicated) == 0))
+  c1
+}
+```
+
+```{r}
+fc1 <-  "~/scratch-data/neta-poc/MSigDB/c1.all.v6.0.entrez.gmt"
+c1 <- msig_import(fc1)
+#summary(c1)
+```
+
+```{r}
+fc4_cgn <-  "~/scratch-data/neta-poc/MSigDB/c4.cgn.v6.0.entrez.gmt"
+c4cgn <- msig_import(fc4_cgn)
+#summary(c4cgn)
+```
+
+```{r}
+fc6 <-  "~/scratch-data/neta-poc/MSigDB/c6.all.v6.0.entrez.gmt"
+c6 <- msig_import(fc6)
+#summary(c6)
+length(c6)
+```
+
+
+```{r}
+length(c(c1, c4cgn, c6))
+```
+
+
+Save the protein GO universe.
+
+```{r, eval = FALSE}
+saveRDS(go2eg, file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-go-bp-to-entrez-gene-list.rds")
+saveRDS(eg2go, file = "~/scratch-data/neta-poc/nohc-mad-filtered/prot-go-entrez-gene-to-bp-list.rds")
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
+```
+

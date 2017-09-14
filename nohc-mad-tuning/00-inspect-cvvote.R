@@ -16,6 +16,16 @@ outdir <- "~/scratch-data/neta-poc/nohc-mad-tuning/05"
 load(file = file.path(outdir, "poc-spacemap-05.rda"))
 
 
+outdir <- "~/scratch-data/neta-poc/nohc-mad-boot-vote/02/"
+load(file = file.path(outdir, "poc-boot-vote-p90-B1000.rda"))
+bv <- readRDS(file = file.path(outdir, "poc-boot-vote-p90-B1000.rds"))
+
+outdir <- "~/scratch-data/neta-poc/nohc-mad-boot-vote/03/"
+#load(file = file.path(outdir, "poc-spacemap-05.rda"))
+load(file = file.path(outdir, "poc-boot-vote-p100-B1000.rda"))
+bv <- readRDS(file = file.path(outdir, "poc-boot-vote-p100-B1000.rds"))
+
+
 
 library(ggplot2)
 outdir <- "~/scratch-data/neta-poc/nohc-mad-tuning/03"
@@ -59,7 +69,6 @@ grid.arrange(cvVis1[[1]] + coord_cartesian(ylim = c(7.106, 7.12)),
              ncol = 2)
 
 
-
 grid.arrange(cvVis1[[1]], cvVis2[[1]],cvVis3[[1]], ncol = 2)
 
 tmap <- expand.grid(lam1 = c(131.7571, seq(131, 132.2, length = 5)),
@@ -70,12 +79,21 @@ library(spacemap)
 nonZeroUpper(cvsmap$cvVote$yy,0.0)
 nonZeroWhole(cvsmap$cvVote$xy,0.0)
 
+library(spacemap)
+nonZeroUpper(bv$bv$yy,0.0)
+nonZeroWhole(bv$bv$xy,0.0)
+
+
+
+
 library(ggplot2)
 degxy <- rowSums(cvsmap$cvVote$xy)
+degxy <- rowSums(bv$bv$xy)
 qplot(degxy[degxy != 0]) + geom_histogram() + theme_bw()
 
 library(ggplot2)
 cvyy <- cvsmap$cvVote$yy
+cvyy <- bv$bv$yy
 cvyy[upper.tri(cvyy, diag = T)] <- 0
 degyy <- rowSums(cvyy)
 qplot(degyy[degyy != 0]) + geom_histogram() + theme_bw()

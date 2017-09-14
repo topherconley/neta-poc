@@ -67,7 +67,9 @@ mpnnl_fullv <- mpnnl[featureNames(yset),]
 xycor_jhuv <- cor(x = x[common_samples_01,], y = t(mjhu_fullv[,common_jhu_01]), method = "spearman")
 xycor_pnnlv <- cor(x = x[common_samples_01,], y = t(mpnnl_fullv[,common_pnnl_01]), method = "spearman")
 xycor_var <- cor(x = x[common_samples_01,], y = y[common_samples_01,], method = "spearman")
-library(ggplot2)
+library(ggplot2
+        
+        )
 p1 <- qplot( x = as.vector(xycor_jhuv), y =  as.vector(xycor_pnnlv)) + geom_point(alpha = 0.3) + 
   geom_smooth() + 
   theme_bw() + 
