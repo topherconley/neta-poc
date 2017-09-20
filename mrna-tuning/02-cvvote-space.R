@@ -1,4 +1,3 @@
-
 ####################
 # PARALLEL BACKEND #
 ####################
@@ -28,7 +27,7 @@ if (comp == "gauss") {
   }
   
   library(doParallel)
-  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_01.txt")
+  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_02.txt")
   print(nodelist)
   cl <- makePSOCKcluster(nodelist, outfile='')
   registerDoParallel(cl)
@@ -41,11 +40,13 @@ if (comp == "gauss") {
   stop("Argument: comp is not specified correctly.")
 }
 
+
 ##################
 #     Data       #
 ##################
-filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered/"
-fy <- "poc-prot-eset-dropout-std.rds"
+filterdir <- "/home/cconley/scratch-data/neta-poc/nohc-mad-filtered"
+#filterdir <- "~/scratch-data/neta-poc/nohc-mad-filtered"
+fy <- "poc-mrna-eset-dropout-std.rds"
 fx <- "poc-cna-eset-dropout-std.rds"
 library(Biobase)
 xset <- readRDS(file.path(filterdir, fx))
@@ -56,39 +57,43 @@ Y <- t(exprs(yset))
 stopifnot(all(sampleNames(xset) == sampleNames(yset)))
 
 ##################
-#PREVIOUS TUNING #
+#   INIT FIT     #
+##################
+N <- nrow(Y)
+Q <- ncol(Y)
+lam1start <- function(n, q, alpha) { 
+  sqrt(n) * qnorm(1 - (alpha/ (2*q^2)))
+}
+lam0 <- lam1start(n = floor(N - N*.10), q = Q, alpha = 1e-5)
+lam0
+
+##################
+#   TUNING       #
 ##################
 
-prev <- new.env()
-tunedir <- "~/scratch-data/neta-poc/nohc-mad-tuning/05"
-load(file = file.path(tunedir, "poc-spacemap-05.rda"), envir = prev)
-tune <- prev$cvsmap$minTune
-tune
+#training/test setse
+trainSets <- readRDS(file.path(filterdir, "train_sets.rds"))
+testSets <- readRDS(file.path(filterdir, "test_sets.rds"))
 
 ##################
-#    ENSEMBLE    #
+#   TRY 02       #
 ##################
+
+#GRID
+tmap <- expand.grid(lam1 = seq(70, 100, length = 20))
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-boot-vote/01"
+respath <- "/home/cconley/scratch-data/neta-poc/mrna-tuning/02"
+if (!dir.exists(respath)) { 
+  system(paste("mkdir -p", respath))  
+}
 
 library(spacemap)
-seed <- 615621
-tictoc <- system.time({ens <- spacemap::bootEnsemble(Y = Y, X = X, tune = tune,
-                                                     method = "spacemap", B = 250,
-                                                     resPath = respath,
-                                                     seed = seed, p0 = 0.90,
-                                                     tol = 1e-4, cdmax = 90e7)})
-save.image(file = file.path(respath, "poc-boot-vote-p90-B250.rda"))
-#stop cluster to not run out of memory
+tictoc <- system.time({cvsmap <- spacemap::cvVote(Y = Y,
+                                                  trainIds = trainSets, testIds = testSets, 
+                                                  method = "space", tuneGrid = tmap, 
+                                                  resPath = respath,
+                                                  tol = 1e-4, cdmax = 120e7,
+						  refitRidge = 0.1)})
+save.image(file = file.path(respath, "poc-space-02.rda"))
 stopCluster(cl)
-#re-register the sequential backend
-registerDoSEQ()
-object.size(ens)
-bv <- bootVote(ens)
-
-##################
-#  SAVE RESULTS  #
-##################
-saveRDS(object = bv, file = file.path(respath, "poc-boot-vote-p90-B250.rds"))
-save.image(file = file.path(respath, "poc-boot-vote-p90-B250.rda"))

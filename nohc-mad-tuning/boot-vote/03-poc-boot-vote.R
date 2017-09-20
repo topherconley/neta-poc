@@ -28,7 +28,7 @@ if (comp == "gauss") {
   }
   
   library(doParallel)
-  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_01.txt")
+  nodelist <- getnodelist(maxpernode=ncores, f = "nodelist_03.txt")
   print(nodelist)
   cl <- makePSOCKcluster(nodelist, outfile='')
   registerDoParallel(cl)
@@ -70,16 +70,16 @@ tune
 ##################
 
 #result directory
-respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-boot-vote/01"
+respath <- "/home/cconley/scratch-data/neta-poc/nohc-mad-boot-vote/03"
 
 library(spacemap)
 seed <- 615621
 tictoc <- system.time({ens <- spacemap::bootEnsemble(Y = Y, X = X, tune = tune,
-                                                     method = "spacemap", B = 250,
+                                                     method = "spacemap", B = 1000,
                                                      resPath = respath,
-                                                     seed = seed, p0 = 0.90,
+                                                     seed = seed, p0 = 1,
                                                      tol = 1e-4, cdmax = 90e7)})
-save.image(file = file.path(respath, "poc-boot-vote-p90-B250.rda"))
+save.image(file = file.path(respath, "poc-boot-vote-p100-B1000.rda"))
 #stop cluster to not run out of memory
 stopCluster(cl)
 #re-register the sequential backend
@@ -90,5 +90,5 @@ bv <- bootVote(ens)
 ##################
 #  SAVE RESULTS  #
 ##################
-saveRDS(object = bv, file = file.path(respath, "poc-boot-vote-p90-B250.rds"))
-save.image(file = file.path(respath, "poc-boot-vote-p90-B250.rda"))
+saveRDS(object = bv, file = file.path(respath, "poc-boot-vote-p100-B1000.rds"))
+save.image(file = file.path(respath, "poc-boot-vote-p100-B1000.rda"))
