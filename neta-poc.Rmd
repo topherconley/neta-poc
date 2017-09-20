@@ -20,6 +20,7 @@ Load the gene coordinate annotations for protein expressions and genomic CNA.
 ```{r}
 library(Biobase)
 yinfo <- pData(featureData(readRDS(file ="~/scratch-data/neta-poc/nohc-mad-filtered/poc-prot-eset-dropout-std.rds")))
+yinfo$chr <- paste0("chr", yinfo$chr)
 xinfo <- pData(featureData(readRDS(file = "~/scratch-data/neta-poc/nohc-mad-filtered/poc-cna-eset-dropout-std.rds")))
 ```
 
@@ -40,7 +41,7 @@ bdeg <- bv$bdeg
 colnames(bdeg$xy) <- xinfo$id; colnames(bdeg$yy) <- yinfo$id;
 ```
 
-Load the Gene Ontology mappings for enrichment analysis. 
+Load the Gene Ontology mappings from Org.Hs.eg.db for enrichment analysis. 
 
 ```{r}
 go2eg <- readRDS("~/scratch-data/neta-poc/nohc-mad-filtered/prot-go-bp-to-entrez-gene-list.rds")
@@ -48,7 +49,6 @@ library(AnnotationDbi)
 #human readable 
 process_alias <- Term(names(go2eg))
 ```
-
 
 ## MSigDB Collections 
 
@@ -76,7 +76,6 @@ msig_import <- function(file, GO = F) {
 
 ### C5 GO Biological Process
 
-From MSigDB: "We omitted GO terms for very broad categories that would produce extremely large gene sets. GO terms that produced gene sets with fewer than 10 genes have also been omitted. We defined sets as "highly similar" if their Jaccard's coefficient was > 0.85. For each pair of highly similar sets we kept only the larger set, and repeated the procedure until all such pairs were resolved."
 
 ```{r}
 fc5 <-  "~/scratch-data/neta-poc/MSigDB/c5.bp.v6.0.entrez.gmt"
@@ -86,17 +85,23 @@ c5 <- msig_import(fc5, GO = T)
 
 ### C1 Positional gene sets
 
-C1: The positional gene sets. From MSigDB: "Gene sets corresponding to each human chromosome and each cytogenetic band that has at least one gene. Cytogenetic locations were parsed from HUGO, October 2006, and UniGene, build 197. We merged the relevant annotations from these resources and derived a single cytogenetic band location for every gene symbol. These were then grouped into sets. Decimals in cytogenetic bands were ignored. For example, 5q31.1 was considered 5q31. Therefore, genes annotated as 5q31.2 and those annotated as 5q31.3 were both placed in the same set, 5q31. When there were conflicts, the UniGene entry was used. **These gene sets can be helpful in identifying effects related to chromosomal deletions or amplifications, dosage compensation, epigenetic silencing, and other regional effects**."
-
 ```{r}
 fc1 <-  "~/scratch-data/neta-poc/MSigDB/c1.all.v6.0.entrez.gmt"
 c1 <- msig_import(fc1)
 #summary(c1)
 ```
 
-### C4 Cancer Gene Neighborhood
+### C2 Reactome
 
-C4.cgn: The cancer gene neighborhood set. From MSigDB: "In our GSEA paper, Subramanian, Tamayo et al. 2005, PNAS 102, 15545-15550, we mined 4 expression compendia datasets for correlated gene sets, **starting with a list of 380 cancer-associated genes** curated from internal resources and Brentani, Caballero et al. Human Cancer Genome Project/Cancer Genome Anatomy Project Annotation Consortium.; Human Cancer Genome Project Sequencing Consortium. The generation and utilization of a cancer-oriented representation of the human transcriptome by using expressed sequence tags. Proc Natl Acad Sci U S A. 2003 Nov 11;100(23):13418-23. Using the profile of a given gene as a template, we ordered every other gene in the data set by its Pearson correlation coefficient. We applied a cutoff of R ≥ 0.85 to extract correlated genes. The calculation of neighborhoods is done independently in each compendium. In this way, a given oncogene may have up to four "types" of neighborhoods according to the correlation present in each compendium. Neighborhoods with <25 genes at this threshold were omitted yielding the final 427 sets."
+
+```{r}
+fc2r <-  "~/scratch-data/neta-poc/MSigDB/c2.cp.reactome.v6.0.entrez.gmt"
+c2r <- msig_import(fc2r)
+#summary(c1)
+```
+
+
+### C4 Cancer Gene Neighborhood
 
 ```{r}
 fc4_cgn <-  "~/scratch-data/neta-poc/MSigDB/c4.cgn.v6.0.entrez.gmt"
@@ -104,9 +109,15 @@ c4cgn <- msig_import(fc4_cgn)
 #summary(c4cgn)
 ```
 
-### C6 Oncogenic signatures
+### C4 Cancer Modules
 
-C6: The oncogenic signatures gene sets. From MSigDB: "Gene sets represent **signatures of cellular pathways which are often dis-regulated in cancer**. The majority of signatures were generated directly from microarray data from NCBI GEO or from internal unpublished profiling experiments which involved perturbation of known cancer genes. In addition, a small number of oncogenic signatures were curated from scientific publications.""
+```{r}
+fc4_cm <-  "~/scratch-data/neta-poc/MSigDB/c4.cm.v6.0.entrez.gmt"
+c4cm <- msig_import(fc4_cm)
+#summary(c4cgn)
+```
+
+### C6 Oncogenic signatures
 
 ```{r}
 fc6 <-  "~/scratch-data/neta-poc/MSigDB/c6.all.v6.0.entrez.gmt"
@@ -139,7 +150,7 @@ vertex_attr(graph = ig, name = "chr", index = V(ig)[alias %in% "GRB7"])
 
 We first prioritize the CNA- and protein- hubs. If  the `bdeg` argument is specified, then we rank the hubs according to the average degree rank. Accordingly, the most highly ranked hubs will have the most consistently high degree across network ensemble. 
 
-To rank the protein nodes, use the `rankHub` command and simply specify the `level = "y"` argument. 
+To rank the protein nodes, use the `rankHub` command and specify the `level = "y"` argument. 
 
 ```{r}
 ig <- rankHub(ig = ig, bdeg = bdeg$yy, level = "y")
@@ -153,9 +164,7 @@ ig <- rankHub(ig = ig, bdeg = bdeg$xy, level = "x")
 
 ### Identify cis and trans
 
-Next label $x-y$ edges as being regulated in cis or in trans. The [GenomicRanges](http://bioconductor.org/packages/release/bioc/html/GenomicRanges.html) R package and the genomic coordinates `chr,start,end` columns of `xinfo` and `yinfo` are required for this step. 
-
-Now we can label the $x-y$ edges with either "cis" or "trans" in the `cis_trans` edge attribute of `ig`.
+Next label $x-y$ edges as being regulated in cis or in trans. The [GenomicRanges](http://bioconductor.org/packages/release/bioc/html/GenomicRanges.html) R package and the genomic coordinates `chr,start,end` columns of `xinfo` and `yinfo` are required for this step.  Now we can label the $x-y$ edges with either "cis" or "trans" in the `cis_trans` edge attribute of `ig`.
 
 ```{r}
 ig <- cisTrans(ig = ig, level = "x-y", cw = 2e6)
@@ -163,10 +172,32 @@ ig <- cisTrans(ig = ig, level = "x-y", cw = 2e6)
 
 ### Report 
 
-We then report a well-organized table, as seen in Table 3 of the spaceMap publication. The `top` argument allows us to control how many hubs are displayed.
-
 ```{r}
-xhubs <- reportHubs(ig, top = 30, level = "x")
+xhubs <- reportHubs(ig, top = 600, level = "x")
+saveRDS(xhubs, "~/scratch-data/neta-poc/neta/protein-boot-vote-xhubs.rds")
+saveRDS(xhubs[order(rownames(xhubs)),], "~/scratch-data/neta-poc/neta/protein-boot-vote-xhubs-sorted-by-id.rds")
+chr_start <- sapply(strsplit(x = rownames(xhubs), split = "_"), function(x) x[2])
+chr_end <- sapply(strsplit(x = rownames(xhubs), split = "_"), function(x) x[2])
+#xhubs$`Potential # cis` <- as.character(xhubs$`Potential # cis`)
+#cis_len <- sapply(strsplit(xhubs$`cis genes`,","), length)
+xhubdir <- "~/scratch-data/neta-poc/neta/tables/xhubs"
+library(xtable)
+xhubstab <- cbind(Cytoband = xhubs$hub, Start = chr_start, End = chr_end, xhubs[,c(2,3,4)])
+head(xhubstab)
+#Part of table  in section ????
+cap <- "Prioritized CNA hubs of \texttt{spaceMap poc-net} in each row with the number of -cis and -trans edges emanating from CNA hub, potential number of -cis relationships for the Hub, and which genes are in -cis with the CNA hub."
+print(xtable(xhubstab, display  = c("d","s", "d", "d", "s", "d", "s"), caption = cap),
+      include.rownames=FALSE,
+      type = "latex", 
+      file = file.path(xhubdir, "poc-spacemap-cna-hub.tex"))
+#excel file
+# xlsx::write.xlsx(x = xhubtab, file = file.path(netadir, "spacemap-xhub-prot.xlsx"))
+# #supplementary section 
+# capsup <- "Prioritized CNA hubs of \texttt{spaceMap prot-net} in each row with gene coordinates, the number of -cis and -trans edges emanating from the CNA hub, potential number of -cis relationships for the Hub, which genes are in -cis with the CNA hub, and the mean (std. deviation) rank of CNA degree across 1000 bootstrap replications."
+# print(xtable(xhubtab[,c(1,3:8)], display  = c("d","s", "d", "d","s", "d", "s", "s"), caption = capsup),
+#       include.rownames=FALSE,
+#       type = "latex", 
+#       file = file.path(netadir, "spacemap-cna-hub-with-prot-supp.tex"))
 ```
 
 ```{r, echo=FALSE}
@@ -185,14 +216,15 @@ kable(yhubs, row.names = FALSE)
 
 ### GO-neighbor percentage
 
-A _CNA neighborhood_ comprises all protein nodes that are directly connected to a CNA hub by an edge. CNA neighborhoods  represent direct perturbations to the proteome by amplifications or deletions in the DNA. To quantify their functional relevance, we compute a score called the _GO-neighbor percentage_. Two protein nodes are called GO-neighbors if they share a common GO term in the same CNA neighborhood. We postulate that a high percentage of GO-neighbors within a CNA neighborhood associates the CNA hub with more functional meaning. These scores, as presented in Figure 5 of the publication, can be generated with a functional mapping to the proteins as follows. 
-
 ```{r}
-hgp <- xHubEnrich(ig = ig, go2eg = c1)
+hgp <- xHubEnrich(ig = ig, go2eg = go2eg)
+#order by degree and GO-neighbor percentage
+hgp2 <- hgp[order(hgp$degree, hgp$neighbor_percentage, decreasing = T)[1:30],]
+hgp3 <- hgp2[hgp2$neighbor_percentage > 40,]
 ```
 
 ```{r, echo=FALSE}
-kable(hgp[order(hgp$degree, hgp$neighbor_percentage, decreasing = T)[1:30],], row.names = FALSE)
+kable(hgp3, row.names = FALSE)
 ```
 
 ## Module Analysis
@@ -211,25 +243,57 @@ saveRDS(mods, file = "~/scratch-data/neta-poc/neta/cluster_edge_betweenness.rds"
 mods <- readRDS(file = "~/scratch-data/neta-poc/neta/cluster_edge_betweenness.rds")
 ```
 
+
+
 ```{r}
-c1mods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c1,  prefix = "C1:")
-c4cgnmods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c4cgn, prefix = "C4,cgn:")
-c6mods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c6, prefix = "C6:")
-# c5mods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c5, prefix = "C5:")
-# head(c5mods$etab)
+write_tex <- function(etab, path, cap = "") { 
+  library(xtable)
+  #Part of table  in section ????
+  print(xtable(xhubstab, display  = c("d","s", "s", "s", "s"), caption = cap),
+        include.rownames=FALSE,
+        type = "latex", 
+        file = file.path(xhubdir, path))
+}
+```
+
+
+```{r}
+c1_mods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c1,  prefix = "C1:")
+enrichdir <- "~/scratch-data/neta-poc/neta/tables/enrichment/"
+
+write_tex(etab = c1_mods$etab, path = file.path(enrichdir, "prot-c1.rds"))
+
+str(c1_mods$etab)
+c4cgn_mods <- modEnrich(ig = c1_mods$ig, mods = mods, levels = "y", go2eg = c4cgn, prefix = "C4,cgn:")
+#c4cgn_mods$etab
+c4cm_mods <- modEnrich(ig = c4cgn_mods$ig, mods = mods, levels = "y", go2eg = c4cm, prefix = "C4,cm:")
+#c4cm_mods$etab
+c6_mods <- modEnrich(ig = c4cm_mods$ig, mods = mods, levels = "y", go2eg = c6, prefix = "C6:")
+#c6_mods$etab
+bioc_mods <- modEnrich(ig = c6_mods$ig, mods = mods, levels = "y", go2eg = go2eg, prefix = "GO:", 
+                       process_alias = process_alias)
+c2r_mods <- modEnrich(ig = bioc_mods$ig, mods = mods, levels = "y", go2eg = c2r,  prefix = "C2,r:")
+#c2r_mods$etab
+bioc_mods$etab
+#knitr::kable(bioc_mods$etab, row.names = F)
+all_mods <- c2r_mods
+saveRDS(all_mods, file = "~/scratch-data/neta-poc/neta/all_170914_mods.rds")
+all_mods <- readRDS(file = "~/scratch-data/neta-poc/neta/all_170914_mods.rds")
+#c5mods <- modEnrich(ig = ig, mods = mods, levels = "y", go2eg = c5, prefix = "C5:")
+#saveRDS(c5mods, file = "~/scratch-data/neta-poc/neta/c5mods.rds")
 ```
 
 ```{r}
-msigmods <- do.call(rbind, list(c1mods$etab, c4cgnmods$etab, 
-                                c6mods$etab))
+msigmods <- do.call(rbind, list(c4cm_mods$etab, c4cgn_mods$etab,
+                                c6_mods$etab, bioc_mods$etab))
 back_fill <- function(x) {
   fill <- x[1]
-  for (i in seq_along(x)) { 
-    if (nchar(x[i]) == 0) { 
+  for (i in seq_along(x)) {
+    if (nchar(x[i]) == 0) {
       x[i] <- fill
     } else {
       fill <- x[i]
-    }  
+    }
   }
   x
 }
@@ -240,30 +304,42 @@ msigmods <- msigmods[order(idmod, cidmod),]
 kable(msigmods)
 ```
 
-
 ## Export for Visualization
 
 ```{r}
-filename <- "~/scratch-data/neta-poc/neta/c1-poc-prot-boot-vote.graphml"
+filename <- "~/scratch-data/neta-poc/neta/all-poc-prot-boot-vote.graphml"
 #delete nodes without edges from the graph object
-vis <- delete_vertices(graph = c1mods$ig, v = V(c1mods$ig)[igraph::degree(c1mods$ig) == 0])
+vis <- delete_vertices(graph = all_mods$ig, v = V(all_mods$ig)[igraph::degree(all_mods$ig) == 0])
 igraph::write_graph(graph = vis, file = filename, format = "graphml")
 ```
 
 
+
 ```{r}
-filename <- "~/scratch-data/neta-poc/neta/c4cgn-poc-prot-boot-vote.graphml"
-#delete nodes without edges from the graph object
-vis <- delete_vertices(graph = c4cgnmods$ig, v = V(c4cgnmods$ig)[igraph::degree(c4cgnmods$ig) == 0])
-igraph::write_graph(graph = vis, file = filename, format = "graphml")
+write.table(x = cbind(alias = V(all_mods$ig)$alias, regualtes_in_cis = V(all_mods$ig)$regulates_in_cis), file = "~/scratch-data/neta-poc/neta/cis.txt")
+```
+
+```{r}
+# filename <- "~/scratch-data/neta-poc/neta/c1-poc-prot-boot-vote.graphml"
+# #delete nodes without edges from the graph object
+# vis <- delete_vertices(graph = c1mods$ig, v = V(c1mods$ig)[igraph::degree(c1mods$ig) == 0])
+# igraph::write_graph(graph = vis, file = filename, format = "graphml")
 ```
 
 
 ```{r}
-filename <- "~/scratch-data/neta-poc/neta/c6-poc-prot-boot-vote.graphml"
-#delete nodes without edges from the graph object
-vis <- delete_vertices(graph = c6mods$ig, v = V(c6mods$ig)[igraph::degree(c6mods$ig) == 0])
-igraph::write_graph(graph = vis, file = filename, format = "graphml")
+# filename <- "~/scratch-data/neta-poc/neta/c4cgn-poc-prot-boot-vote.graphml"
+# #delete nodes without edges from the graph object
+# vis <- delete_vertices(graph = c4cgnmods$ig, v = V(c4cgnmods$ig)[igraph::degree(c4cgnmods$ig) == 0])
+# igraph::write_graph(graph = vis, file = filename, format = "graphml")
+```
+
+
+```{r}
+# filename <- "~/scratch-data/neta-poc/neta/c6-poc-prot-boot-vote.graphml"
+# #delete nodes without edges from the graph object
+# vis <- delete_vertices(graph = c6mods$ig, v = V(c6mods$ig)[igraph::degree(c6mods$ig) == 0])
+# igraph::write_graph(graph = vis, file = filename, format = "graphml")
 ```
 
 

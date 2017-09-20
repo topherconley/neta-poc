@@ -1,5 +1,10 @@
+*.html
+.Rhistory
+.RData
+.DS_Store
 *_cache
 *_files
 *png
 .Rproj.user/
 *.Rproj
+.Rproj.user

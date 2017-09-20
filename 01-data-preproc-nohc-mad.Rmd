@@ -147,8 +147,6 @@ saveRDS(object = cnaset, file = file.path(filterdir, "poc-cna-eset.rds"))
 cnaset
 ```
 
-
-
 ## Variable Proteomics Data
 
 Import the "VariableProteomeOvarianData" from table S2, sheet 2. Keep the genes for downstream analysis that are in the top 60% of standard deviations. This leaves 2151 features for the 169 samples. 
@@ -249,6 +247,108 @@ featureData(protmad) <- AnnotatedDataFrame(data = prot_node_attr_final,
 protmad
 ```
 
+## Microarray Data
+
+Import the ovarian microarray data and log2-transform the expression values. Then filter out expression values that are not in the top 12% of median absolute deviation (MAD) to have a consistent feature size for mRNA and protein data types. 
+
+```{r}
+library(readr)
+rpoc <- read_csv(file = "~/scratch-data/neta-poc/mrna/mrna169_170807.csv")
+rpoc_gene_symbols <- rpoc$X1
+rpoc <- rpoc[,2:ncol(rpoc)]
+colnames(rpoc)<-substr(colnames(rpoc), 1, 12)
+red <- as.matrix(rpoc[,vpoc_samples])
+red <- log2(red)
+#convert gene symbol to RefseqID
+rownames(red) <- rpoc_gene_symbols
+#initial feature information
+fd <-  data.frame(Symbol= rpoc_gene_symbols, 
+                   row.names = rpoc_gene_symbols)
+rpocset <- ExpressionSet(assayData = red,
+                         featureData = AnnotatedDataFrame(data = fd))
+rexp <- exprs(rpocset)
+#no missing RNA
+stopifnot(!any(is.na(rexp)))
+sd_rexp <- apply(X = rexp, MARGIN = 1, FUN = sd)
+mad_rexp <- apply(X = rexp, MARGIN = 1, FUN = mad)
+mean_rexp <- apply(X = rexp, MARGIN = 1, FUN = mean)
+keep_rna_index <- mad_rexp > quantile(x = mad_rexp, probs = 0.88)
+rnamad <- rpocset[which(keep_rna_index),]
+#no duplicated refseq ids
+stopifnot(!anyDuplicated(featureNames(rnamad)))
+rnamad
+```
+
+The mean-variance relationship of the microarray data is as follows. 
+
+```{r}
+qplot(mean_rexp, mad_rexp, geom = "point") + theme_bw() 
+```
+
+The standard deviation and the median absolute deviation are very correlated. 
+
+```{r}
+qplot(sd_rexp, mad_rexp, geom = "point") + theme_bw() 
+```
+
+Add annotation attributes for the mRNA features. 
+
+```{r}
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+filters <- listFilters(ensembl)
+grep("entrez", filters$name, value = T)
+rna_hgnc_symbols  <- featureNames(rnamad)
+rna_node_attr <- getBM(attributes = c('hgnc_symbol', 'entrezgene', 'chromosome_name',
+                                      'start_position', 'end_position', 'band'),
+                       filters = 'hgnc_symbol', 
+                       values = rna_hgnc_symbols, 
+                       mart = ensembl)
+knitr::kable(head(rna_node_attr), row.names = F)
+```
+
+Handle duplicate HGSC symbols. 
+
+```{r}
+dupids <- rna_node_attr$hgnc_symbol[which(duplicated(rna_node_attr$hgnc_symbol))]
+must_dedup_index <- rna_node_attr$hgnc_symbol %in% dupids
+must_dedup <- rna_node_attr[must_dedup_index,]
+must_dedup_group <- split(x = must_dedup, 
+                          f = as.factor(must_dedup$hgnc_symbol))
+suppressPackageStartupMessages(library(data.table))
+fclean_dups <- function(i) { 
+  j <- grep("CHR_", must_dedup_group[[i]]$chromosome_name, invert = T)  
+    #HLA locus
+  if (length(j) < 1) { 
+    j <- sample.int(1, 1)
+  }
+  must_dedup_group[[i]][j,]
+} 
+library(data.table)
+clean_dups <- lapply(seq_along(must_dedup_group), fclean_dups) 
+#further_inspect <- must_dedup_group[which(sapply(clean_dups, nrow) == 0)]
+clean_dups <- as.data.frame(rbindlist(clean_dups))
+
+
+#missing attributes for some features
+miss_rna_attr <- data.frame(hgnc_symbol= setdiff(rna_hgnc_symbols, rna_node_attr$hgnc_symbol),
+                             entrezgene = NA, 
+                             chromosome_name = NA, 
+                             start_position = NA, 
+                             end_position = NA, 
+                             band = NA)
+
+#combine non-duplicated, de-duplicated, missing attributes
+cleaned_rna_attr <- rbind(rna_node_attr[!must_dedup_index,], clean_dups, miss_rna_attr)
+#View(cleaned_rna_attr)
+#match the correct order as the eset feature names
+rna_node_attr_final <- cleaned_rna_attr[match(featureNames(rnamad), cleaned_rna_attr$hgnc_symbol),]
+#View(rna_node_attr_final)
+metaData <- data.frame(labelDescription= colnames(rna_node_attr_final))
+colnames(rna_node_attr_final) <- c("id", "alias", "chr", "start", "end", "cytoband")
+featureData(rnamad) <- AnnotatedDataFrame(data = rna_node_attr_final, 
+                                          varMetadata = metaData)
+```
+
 ## Outlier Analysis
 
 [Filzmoser et al.](http://dx.doi.org/10.1016/j.csda.2007.05.018) introduced a method called `PCOut` for outlier detection in high dimension that is computationally fast. It is implemented in the CRAN package [mvoutlier](https://github.com/cran/mvoutlier/blob/master/R/pcout.R) and leverages a semi-robust principal component decomposition to identify outliers of two types: those samples that differ in their location parameter from the rest of the samples and those that differ in their scatter (scale). We applied `PCout` for each subtype.
@@ -260,6 +360,7 @@ suppressPackageStartupMessages(library(mvoutlier))
 suppressPackageStartupMessages(library(Biobase))
 prot_pco <- pcout(x = t(exprs(protmad)))
 cna_pco <-  pcout(x = t(exprs(cnaset)))
+rna_pco <-  pcout(x = t(exprs(rnamad)))
 ```
 
 Visualize the outliers for each subtype and report the ratio of potential outliers to total samples. 
@@ -285,6 +386,7 @@ oa_fig <- function(o, loa) {
 
 plot_outliers(cna_pco) + ggtitle("CNA Outlier Analysis")
 plot_outliers(prot_pco) + ggtitle("Protein Outlier Analysis")
+plot_outliers(rna_pco) + ggtitle("mRNA Outlier Analysis")
 ```
 
 Identify the sample ID of the the most extreme outliers. 
@@ -298,17 +400,22 @@ outlier_by_loc <- function(loa, thresh_loc) {
 }
 #thresholds
 protein_outliers <- outlier_by_loc(prot_pco, 30)
+rna_outliers <- outlier_by_loc(rna_pco, 30)
 cna_outliers <-  outlier_by_loc(cna_pco, 19.5)
+#no comon intersection
+#intersect(protein_outliers, rna_outliers)
 ```
 
-We decided to remove the most extreme outlier just from the protein for now. 
+We analyzed protein before mRNA early in the study, and at that point in time we decided to remove the most extreme outliers from protein. We postulate subtle differences in training/test sets between mRNA and protein---induced by removing the mRNA outlying samples---could have more undesirable outcome than removing a few outlying samples specific to mRNA. Therefore, we will not remove any outliers specific to mRNA and proceed. 
 
 ```{r}
 #assert sample names match
-stopifnot(sampleNames(protmad) == sampleNames(cnaset))
+stopifnot(sampleNames(protmad) == sampleNames(cnaset), sampleNames(rnamad) == sampleNames(cnaset))
 protmad <- protmad[,!(sampleNames(protmad) %in% protein_outliers)]
+rnamad <- rnamad[,!(sampleNames(rnamad) %in% protein_outliers)]
 cnaset <- cnaset[,!(sampleNames(cnaset) %in% protein_outliers)]
 stopifnot(sampleNames(protmad) == sampleNames(cnaset))
+stopifnot(sampleNames(rnamad) == sampleNames(cnaset))
 ```
 
 ### Highly Correlated CNA
@@ -436,6 +543,7 @@ nclustered <- nrow(tmp[!is.na(tmp$clustered_with),])
 
 There are `r nclustered` clusters of protein isoforms, where only one isoform was selected as representative of the gene. It was verified that after this clustering there are no remaining features that have correlation exceeding 0.999. 
 
+
 ```{r, echo = F, eval = F}
 #Identify the number of highly correlated proteins (pairwise correlation exceeding 0.999) for each subtype and report how many highly correlated proteins come from the same gene. 
 hc_proteins_manual <- function(eset, thresh =  0.999) { 
@@ -493,6 +601,61 @@ hc_proteins_manual <- function(eset, thresh =  0.999) {
 # by_isoform <- split(hcp, hcp$alias_i)
 # library(readr)
 # write_excel_csv(x = hcp, path = file.path(filterdir, "highly-correlated-pairs.csv"))
+```
+
+
+### Highly Correlated mRNA
+
+We clustered the microarray probes in the same fashion as the protein and CNA features (see below). No probes were found to be highly correlated. 
+
+```{r}
+hc_mrna <- function(eset) { 
+  X <- t(exprs(eset))
+  library(fpc)
+  dR <- 1 - abs(cor(X))
+  clout <- fpc::dbscan(data = dR, MinPts = 2, eps = 1e-3, method = "dist")
+  
+  suppressWarnings(library(stringdist))
+  library(foreach)
+  clusterDistr <- as.data.frame(table(clout$cluster), stringAsFactors = FALSE)
+  #nothing to cluster
+  if(nrow(clusterDistr)) { 
+    exprs(eset) <- t(scale(t(exprs(eset))))
+    saveRDS(object = eset, 
+            file = file.path(filterdir, 
+                             "poc-mrna-eset-dropout-std.rds"))
+    return(eset)
+  }
+  #Cluster `0` corresponds to sufficiently independent CNA's.
+  #Omit it from the multi-colinear analysis.
+  mcolinear <- clusterDistr$Var1[2:nrow(clusterDistr)]
+  
+  sym <-fData(eset)$alias
+  id <-fData(eset)$id
+  namesMultiCol <- foreach(i = seq_along(mcolinear)) %do% {
+    id[clout$cluster == mcolinear[i]]
+  }
+  
+  #sum(unique(unlist(namesMultiCol)) %in% c(hcp$alias_j, hcp$alias_i))
+  toResolve <- namesMultiCol
+  keep <- sapply(toResolve, function(x) x[1])
+  as_clustered <- sapply(toResolve, function(x) x[2:length(x)])
+  drop_clustered <- unlist(as_clustered)
+  eset2 <- eset[!(featureNames(eset) %in% drop_clustered),]
+  fd2 <- pData(featureData(eset2))
+  fd2$clustered_with <- NA
+  fd2$clustered_with[fd2$id %in% keep] <- sapply(as_clustered, 
+                                                 function(x)
+                                                   paste0(x, collapse = "; "))
+  eset2@featureData <- AnnotatedDataFrame(fd2)
+  #standardize after -> no outliers -> no multicolinearity
+  exprs(eset2) <- t(scale(t(exprs(eset2))))
+  saveRDS(object = eset2, 
+          file = file.path(filterdir, 
+                           "poc-mrna-eset-dropout-std.rds"))
+  eset2
+}
+rnamad <- hc_mrna(rnamad)
 ```
 
 ## Cross Validation Folds

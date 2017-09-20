@@ -44,8 +44,8 @@ library(gridExtra)
 grid.arrange(cvVis1[[1]], cvVis1[[2]],cvVis1[[3]], cvVis1[[4]], ncol = 2)
 
 cvsmap$metricScores$rss[cvsmap$minIndex,]
-cvsmap$metricScores$dfParCor[cvsmap$minIndex,]
-cvsmap$metricScores$dfGamma[cvsmap$minIndex,]
+mean(cvsmap$metricScores$dfParCor[cvsmap$minIndex,])
+mean(cvsmap$metricScores$dfGamma[cvsmap$minIndex,])
 
 cvVis1 <- spacemap::tuneVis(cvOut = cvsmap, testSetLen = nsplits, 
                             tuneParam1 = tmap$lam3, tuneParam1Name = "lam3")
